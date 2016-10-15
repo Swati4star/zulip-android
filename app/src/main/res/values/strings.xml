@@ -10,6 +10,7 @@
     <string name="server_domain">Server domain</string>
     <string name="legal">Legal information</string>
     <string name="logout">Log out</string>
+    <string name="force_logged_out">You\'ve been logged out</string>
     <string name="huddle_text">You</string>
     <string name="topic">Topic</string>
     <string name="close">Close</string>
@@ -65,6 +66,7 @@
     <string name="menu_today">Today</string>
     <string name="http_or_https">HTTP/HTTPS</string>
     <string name="http_message">HTTP is insecure, and we recommend using it only for testing the Zulip Android app against a development environment. Are you sure you want to use HTTP?</string>
+    <string name="http_message_debug">Which scheme you would like to use HTTP or HTTPS?</string>
     <string name="use_https">Use HTTPS</string>
     <string name="use_http">Use HTTP</string>
     <string name="empty_list">Sorry, no messages here.</string>
@@ -85,4 +87,6 @@
     <string name="toast_login_failed_fetching_backends">Failed to fetch Backends!</string>
     <string name="login_activity_toast_login_error">Unknown login error.</string>
     <string name="no_topic_in_message">(no topic)</string>
+    <string name="message_copied">Message Copied</string>
+    <string name="login_failed">Unable to login</string>
 </resources>

@@ -9,7 +9,7 @@ import retrofit2.Callback;
 import retrofit2.Response;
 
 
-public class DefaultCallback<T> implements Callback<T> {
+public abstract class DefaultCallback<T> implements Callback<T> {
 
     @Override
     @CallSuper
@@ -18,13 +18,14 @@ public class DefaultCallback<T> implements Callback<T> {
             onSuccess(call, response);
         }
         else {
-            onFailure(call, null);
+            onError(call, response);
         }
     }
 
-    public void onSuccess(Call<T> call, Response<T> response) {
+    public abstract void onSuccess(Call<T> call, Response<T> response);
 
-    }
+    public abstract void onError(Call<T> call, Response<T> response);
+
 
     @Override
     public void onFailure(Call<T> call, Throwable t) {

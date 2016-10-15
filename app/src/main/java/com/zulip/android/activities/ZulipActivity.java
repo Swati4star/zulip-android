@@ -90,6 +90,7 @@ import com.zulip.android.networking.ZulipInterceptor;
 import com.zulip.android.networking.response.UserConfigurationResponse;
 import com.zulip.android.service.ZulipServices;
 import com.zulip.android.util.AnimationHelper;
+import com.zulip.android.util.MutedTopics;
 import com.zulip.android.util.SwipeRemoveLinearLayout;
 import com.zulip.android.util.ZLog;
 import com.zulip.android.ZulipApp;
@@ -164,6 +165,8 @@ public class ZulipActivity extends BaseActivity implements
     private SimpleCursorAdapter subjectActvAdapter;
     private SimpleCursorAdapter emailActvAdapter;
     private AppBarLayout appBarLayout;
+
+    private MutedTopics mMutedTopics;
 
     private BroadcastReceiver onGcmMessage = new BroadcastReceiver() {
         public void onReceive(Context contenxt, Intent intent) {
@@ -240,29 +243,36 @@ public class ZulipActivity extends BaseActivity implements
     }
 
     @Override
-    public void muteTopic(Message message) {
-        app.muteTopic(message);
-        for (int i = homeList.adapter.getItemCount() - 1; i >= 0; i--) {
-            Object object = homeList.adapter.getItem(i);
-            if (object instanceof Message) {
-                Message msg = (Message) object;
-                if (msg.getStream() != null
-                        && msg.getStream().getId() == message.getStream().getId()
-                        && msg.getSubject().equals(message.getSubject())) {
-                    mutedTopics.add(msg);
-                    homeList.adapter.remove(msg);
-                }
+    public void recyclerViewScrolled() {
+            /* in this method we check if the messageEt is empty or not
+            if messageEt is not empty, it means that the user has typed something in the chatBox and that the chatBox should be open
+            in spite of scrolling */
+        if(chatBox.getVisibility()== View.VISIBLE && !isCurrentModeStream()){
+            //if messageEt is empty in private msg mode, then the chatBox can disappear on scrolling else it will stay
+            if(messageEt.getText().toString().equals(""))
+            {
+                displayChatBox(false);
+                displayFAB(true);
+
             }
         }
-        homeList.adapter.notifyDataSetChanged();
-    }
 
-    @Override
-    public void recyclerViewScrolled() {
-        if (chatBox.getVisibility() == View.VISIBLE && !isTextFieldFocused) {
+        else if(chatBox.getVisibility()==View.VISIBLE && isCurrentModeStream()){
+            //check if messageEt is empty in stream msg mode, then the chatBox can disappear on scrolling else it will disappear
+            if(messageEt.getText().toString().equals("") && topicActv.getText().toString().equals(""))
+            {
+                displayChatBox(false);
+                displayFAB(true);
+
+            }
+        }
+        /*check if stream edittext, topic edittext and messageEt edittext is empty in a general msg mode(i.e. when the floating
+        button is pressed by user). If all fields are empty, then on scrolling the chatBox will disappear else not  */
+        else if (chatBox.getVisibility() == View.VISIBLE && streamActv.getText().toString().equals("") && topicActv.getText().toString().equals("") && messageEt.getText().toString().equals("")) {
             displayChatBox(false);
             displayFAB(true);
         }
+
     }
 
     public RefreshableCursorAdapter getPeopleAdapter() {
@@ -279,14 +289,17 @@ public class ZulipActivity extends BaseActivity implements
         super.onCreate(savedInstanceState);
 
         app = (ZulipApp) getApplicationContext();
-        settings = app.getSettings();
-
         processParams();
 
         if (!app.isLoggedIn()) {
             openLogin();
             return;
         }
+
+        if (mMutedTopics == null) {
+            mMutedTopics = MutedTopics.get();
+        }
+
         this.logged_in = true;
         notifications = new Notifications(this);
         notifications.register();
@@ -770,7 +783,7 @@ public class ZulipActivity extends BaseActivity implements
                     case R.id.name_child:
                         TextView name_child = (TextView) view;
                         name_child.setText(cursor.getString(columnIndex));
-                        if (app.isTopicMute(cursor.getInt(1), cursor.getString(columnIndex))) {
+                        if (mMutedTopics.isTopicMute(cursor.getInt(1), cursor.getString(columnIndex))) {
                             name_child.setTextColor(ContextCompat.getColor(ZulipActivity.this, R.color.colorTextSecondary));
                         }
                         return true;
@@ -1216,9 +1229,13 @@ public class ZulipActivity extends BaseActivity implements
         displayFAB(false);
         switchToPrivate();
         ArrayList<String> names = new ArrayList<String>();
-        for (Person person : peopleList) {
-            if (person.getId() != app.getYou().getId()) {
-                names.add(person.getEmail());
+        if (peopleList.length == 1) {
+            names.add(peopleList[0].getEmail());
+        } else {
+            for (Person person : peopleList) {
+                if (person.getId() != app.getYou().getId()) {
+                    names.add(person.getEmail());
+                }
             }
         }
         topicActv.setText(TextUtils.join(", ", names));

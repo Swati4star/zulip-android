@@ -28,10 +28,12 @@ import com.zulip.android.filters.NarrowFilterPM;
 import com.zulip.android.filters.NarrowFilterStream;
 import com.zulip.android.filters.NarrowListener;
 import com.zulip.android.models.Message;
+import com.zulip.android.models.Person;
 import com.zulip.android.models.Stream;
 import com.zulip.android.networking.AsyncGetOldMessages;
 import com.zulip.android.networking.ZulipAsyncPushTask;
 import com.zulip.android.util.MessageListener;
+import com.zulip.android.util.MutedTopics;
 import com.zulip.android.viewholders.HeaderSpaceItemDecoration;
 
 import org.json.JSONObject;
@@ -48,6 +50,7 @@ import java.util.List;
 public class MessageListFragment extends Fragment implements MessageListener {
     private static final int PIXEL_OFFSET_MESSAGE_HEADERS = 24;
     private LinearLayoutManager linearLayoutManager;
+    private MutedTopics mMutedTopics;
 
     /**
      * This interface must be implemented by activities that contain this
@@ -62,8 +65,6 @@ public class MessageListFragment extends Fragment implements MessageListener {
         void onListResume(MessageListFragment f);
 
         void addToList(Message message);
-
-        void muteTopic(Message message);
 
         void recyclerViewScrolled();
 
@@ -97,6 +98,7 @@ public class MessageListFragment extends Fragment implements MessageListener {
 
     public MessageListFragment() {
         app = ZulipApp.get();
+        mMutedTopics = MutedTopics.get();
         // Required empty public constructor
     }
 
@@ -151,7 +153,7 @@ public class MessageListFragment extends Fragment implements MessageListener {
         recyclerView = (RecyclerView) view.findViewById(R.id.recyclerView);
         linearLayoutManager = new LinearLayoutManager(getContext());
         recyclerView.setLayoutManager(linearLayoutManager);
-        adapter = new RecyclerMessageAdapter(messageList, getActivity(), (filter == null));
+        adapter = new RecyclerMessageAdapter(messageList, getActivity(), (filter != null));
         recyclerView.addItemDecoration(new HeaderSpaceItemDecoration(PIXEL_OFFSET_MESSAGE_HEADERS, getContext()));
         recyclerView.setAdapter(adapter);
         registerForContextMenu(recyclerView);
@@ -208,7 +210,8 @@ public class MessageListFragment extends Fragment implements MessageListener {
                 ((NarrowListener) getActivity()).onNarrowFillSendBox(message, true);
                 return true;
             case R.id.reply_to_sender:
-                ((NarrowListener) getActivity()).onNarrowFillSendBox(message, true);
+                Person[] senderList = {message.getSender()};
+                ((NarrowListener) getActivity()).onNarrowFillSendBoxPrivate(senderList, true);
                 return true;
             case R.id.narrow_to_private:
                 if (getActivity() instanceof NarrowListener) {
@@ -230,6 +233,7 @@ public class MessageListFragment extends Fragment implements MessageListener {
                 return true;
             case R.id.copy_message:
                 copyMessage(message);
+                Toast.makeText(getContext(),R.string.message_copied, Toast.LENGTH_SHORT).show();
                 return true;
             default:
                 return super.onContextItemSelected(item);
@@ -370,7 +374,7 @@ public class MessageListFragment extends Fragment implements MessageListener {
             Stream stream = message.getStream();
 
             if (stream != null && filter == null) { //Filter muted messages only in homescreen.
-                if (app.isTopicMute(message)) {
+                if (mMutedTopics.isTopicMute(message)) {
                     mListener.addToList(message);
                     continue;
                 }

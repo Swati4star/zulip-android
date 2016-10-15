@@ -31,8 +31,10 @@ import com.zulip.android.networking.response.ZulipBackendResponse;
 import com.zulip.android.networking.util.DefaultCallback;
 import com.zulip.android.util.AnimationHelper;
 
+import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.IOException;
 import java.util.List;
 
 import retrofit2.Call;
@@ -160,7 +162,8 @@ public class LoginActivity extends BaseActivity implements View.OnClickListener,
         // add http or https if scheme is not included
         if (!serverURL.contains("://")) {
             serverURL = httpScheme + "://" + serverURL;
-            showBackends(httpScheme, serverURL);
+            if (BuildConfig.DEBUG) showHTTPDialog(serverURL); //Ask for http or https if in non-prod builds otherwise if in prod then use https
+            else showBackends(httpScheme, serverURL);
         } else {
             Uri serverUri = Uri.parse(serverURL);
 
@@ -216,6 +219,11 @@ public class LoginActivity extends BaseActivity implements View.OnClickListener,
                     }
 
                     @Override
+                    public void onError(Call<ZulipBackendResponse> call, Response<ZulipBackendResponse> response) {
+                        Toast.makeText(LoginActivity.this, R.string.toast_login_failed_fetching_backends, Toast.LENGTH_SHORT).show();
+                    }
+
+                    @Override
                     public void onFailure(Call<ZulipBackendResponse> call, Throwable t) {
                         super.onFailure(call, t);
                         Toast.makeText(LoginActivity.this, R.string.toast_login_failed_fetching_backends, Toast.LENGTH_SHORT).show();
@@ -227,7 +235,7 @@ public class LoginActivity extends BaseActivity implements View.OnClickListener,
     private void showHTTPDialog(final String serverURL) {
         new AlertDialog.Builder(this)
                 .setTitle(R.string.http_or_https)
-                .setMessage(R.string.http_message)
+                .setMessage(((BuildConfig.DEBUG) ? R.string.http_message_debug : R.string.http_message))
                 .setPositiveButton(R.string.use_https, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
                         dialog.dismiss();
@@ -267,8 +275,13 @@ public class LoginActivity extends BaseActivity implements View.OnClickListener,
                         @Override
                         public void onSuccess(Call<LoginResponse> call, Response<LoginResponse> response) {
                             connectionProgressDialog.dismiss();
-                            getApp().setEmail(response.body().getEmail());
+                            getApp().setLoggedInApiKey(response.body().getApiKey(), response.body().getEmail());
                             openHome();
+                        }
+
+                        @Override
+                        public void onError(Call<LoginResponse> call, Response<LoginResponse> response) {
+                            connectionProgressDialog.dismiss();
                         }
 
                         @Override
@@ -333,6 +346,7 @@ public class LoginActivity extends BaseActivity implements View.OnClickListener,
                     .build();
 
             mGoogleApiClient.connect();
+
             allowUserToPickAccount();
         } else {
             allowUserToPickAccount();
@@ -359,7 +373,6 @@ public class LoginActivity extends BaseActivity implements View.OnClickListener,
                 connectionProgressDialog.show();
                 String username = mUserName.getText().toString();
                 String password = mPassword.getText().toString();
-                getApp().setEmail(username);
                 getServices()
                         .login(username, password)
                         .enqueue(new DefaultCallback<LoginResponse>() {
@@ -367,8 +380,25 @@ public class LoginActivity extends BaseActivity implements View.OnClickListener,
                             @Override
                             public void onSuccess(Call<LoginResponse> call, Response<LoginResponse> response) {
                                 connectionProgressDialog.dismiss();
-                                getApp().setLoggedInApiKey(response.body().getApiKey());
+                                getApp().setLoggedInApiKey(response.body().getApiKey(), response.body().getEmail());
                                 openHome();
+                            }
+
+
+                            @Override
+                            public void onError(Call<LoginResponse> call, Response<LoginResponse> response) {
+                                connectionProgressDialog.dismiss();
+                                if (response != null && response.errorBody() != null) {
+                                    try {
+                                        JSONObject message = new JSONObject(response.errorBody().string());
+                                        Toast.makeText(LoginActivity.this, message.getString("msg"), Toast.LENGTH_LONG).show();
+                                    } catch (JSONException | IOException e) {
+                                        // oops
+                                        Toast.makeText(LoginActivity.this, R.string.login_activity_toast_login_error, Toast.LENGTH_LONG).show();
+                                    }
+                                } else {
+                                    Toast.makeText(LoginActivity.this, R.string.login_activity_toast_login_error, Toast.LENGTH_LONG).show();
+                                }
                             }
 
                             @Override

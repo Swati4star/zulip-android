@@ -1,12 +1,17 @@
 package com.zulip.android.networking;
 
 import android.content.Intent;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
+import android.widget.Toast;
 
 import com.j256.ormlite.dao.RuntimeExceptionDao;
 import com.j256.ormlite.misc.TransactionManager;
+import com.zulip.android.R;
 import com.zulip.android.ZulipApp;
+import com.zulip.android.activities.LoginActivity;
 import com.zulip.android.activities.ZulipActivity;
 import com.zulip.android.models.Message;
 import com.zulip.android.models.MessageRange;
@@ -16,6 +21,7 @@ import com.zulip.android.networking.response.UserConfigurationResponse;
 import com.zulip.android.networking.response.events.EventsBranch;
 import com.zulip.android.networking.response.events.GetEventResponse;
 import com.zulip.android.networking.response.events.MessageWrapper;
+import com.zulip.android.util.MutedTopics;
 import com.zulip.android.util.TypeSwapper;
 import com.zulip.android.util.ZLog;
 import com.zulip.android.widget.ZulipWidget;
@@ -39,38 +45,38 @@ import java.util.concurrent.Callable;
 public class AsyncGetEvents extends Thread {
     private static final String TAG = "AsyncGetEvents";
     private static final String ASYNC_GET_EVENTS = "asyncGetEvents";
-    private static final String POINTER = "pointer";
-    private ZulipActivity activity;
-    private ZulipApp app;
-    private static int interval = 1000;
-    private boolean calledFromWidget = false;
 
     private boolean keepThisRunning = true;
     private HTTPRequest request;
 
-    private AsyncGetEvents that = this;
     private int failures = 0;
     private boolean registeredOrGotEventsThisRun;
+    private MutedTopics mMutedTopics;
+    private ZulipApp app;
+    private ZulipActivity mActivity;
+    private int mInterval = 1000;
 
-    public AsyncGetEvents(ZulipActivity zulipActivity) {
+    public AsyncGetEvents(ZulipActivity activity) {
         super();
-        app = (ZulipApp) zulipActivity.getApplication();
-        activity = zulipActivity;
-        request = new HTTPRequest(app);
+        mActivity = activity;
+        init();
     }
 
-    public AsyncGetEvents(ZulipApp zulipApp, int interval) {
+    public AsyncGetEvents(int interval) {
         super();
-        app = zulipApp;
-        activity = null;
+        mInterval = interval;
+        init();
+    }
+
+    private void init() {
+        app = ZulipApp.get();
+        mMutedTopics = MutedTopics.get();
         request = new HTTPRequest(app);
-        calledFromWidget = true;
-        this.interval = interval;
     }
 
     public void start() {
         registeredOrGotEventsThisRun = false;
-        if (!calledFromWidget) {
+        if (mActivity != null) {
             super.start();
         }
     }
@@ -144,7 +150,7 @@ public class AsyncGetEvents extends Thread {
                         }
                     }
                     //MUST UPDATE AFTER SUBSCRIPTIONS ARE STORED IN DB
-                    app.addToMutedTopics(response.getMutedTopics());
+                    mMutedTopics.addToMutedTopics(response.getMutedTopics());
 
                     // Get people
                     List<Person> people = response.getRealmUsers();
@@ -172,13 +178,13 @@ public class AsyncGetEvents extends Thread {
                 }
             });
 
-            if (!calledFromWidget) {
-                activity.runOnUiThread(new Runnable() {
+            if (mActivity != null) {
+                mActivity.runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        that.activity.getPeopleAdapter().refresh();
-                        activity.onReadyToDisplay(true);
-                        activity.checkAndSetupStreamsDrawer();
+                        mActivity.getPeopleAdapter().refresh();
+                        mActivity.onReadyToDisplay(true);
+                        mActivity.checkAndSetupStreamsDrawer();
                     }
                 });
             }
@@ -216,6 +222,19 @@ public class AsyncGetEvents extends Thread {
                             Log.w(ASYNC_GET_EVENTS, "Queue dead");
                             app.setEventQueueId(null);
                             continue;
+                        } else if (eventResponse.code() == 401) {
+                            Handler handler = new Handler(Looper.getMainLooper());
+                            handler.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    Toast.makeText(app.getBaseContext(), R.string.force_logged_out, Toast.LENGTH_LONG).show();
+                                    app.logOut();
+                                    Intent i = new Intent(app, LoginActivity.class);
+                                    i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK|Intent.FLAG_ACTIVITY_NEW_TASK);
+                                    app.startActivity(i);
+                                }
+                            });
+                            break;
                         }
 
                         backoff(null);
@@ -227,12 +246,12 @@ public class AsyncGetEvents extends Thread {
                             failures = 0;
                         }
 
-                        if (!registeredOrGotEventsThisRun) {
+                        if (!registeredOrGotEventsThisRun && mActivity != null) {
                             registeredOrGotEventsThisRun = true;
-                            activity.runOnUiThread(new Runnable() {
+                            mActivity.runOnUiThread(new Runnable() {
                                 @Override
                                 public void run() {
-                                    activity.onReadyToDisplay(false);
+                                    mActivity.onReadyToDisplay(false);
                                 }
                             });
                         }
@@ -251,7 +270,7 @@ public class AsyncGetEvents extends Thread {
                 } catch (JSONException e) {
                     backoff(e);
                 }
-                Thread.sleep(interval);
+                Thread.sleep(mInterval);
             }
         } catch (Exception e) {
             ZLog.logException(e);
@@ -288,11 +307,11 @@ public class AsyncGetEvents extends Thread {
         int lastMessageId = messages.get(messages.size() - 1).getID();
         MessageRange.updateNewMessagesRange(app, lastMessageId);
 
-        if (!calledFromWidget) {
-            activity.runOnUiThread(new Runnable() {
+        if (mActivity != null) {
+            mActivity.runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-                    activity.onNewMessages(messages.toArray(new Message[messages.size()]));
+                    mActivity.onNewMessages(messages.toArray(new Message[messages.size()]));
                 }
             });
         } else {

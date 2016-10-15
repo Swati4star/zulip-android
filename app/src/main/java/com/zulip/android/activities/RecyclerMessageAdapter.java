@@ -5,6 +5,7 @@ import android.content.res.ColorStateList;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.support.annotation.ColorInt;
 import android.support.v4.content.ContextCompat;
 import android.support.v4.view.ViewCompat;
@@ -19,6 +20,7 @@ import android.view.View;
 import android.view.ViewGroup;
 
 import com.j256.ormlite.stmt.UpdateBuilder;
+import com.squareup.picasso.Callback;
 import com.squareup.picasso.Picasso;
 import com.zulip.android.R;
 import com.zulip.android.ZulipApp;
@@ -29,7 +31,9 @@ import com.zulip.android.models.Message;
 import com.zulip.android.models.MessageType;
 import com.zulip.android.models.Person;
 import com.zulip.android.models.Stream;
+import com.zulip.android.util.MutedTopics;
 import com.zulip.android.util.OnItemClickListener;
+import com.zulip.android.util.UrlHelper;
 import com.zulip.android.util.ZLog;
 import com.zulip.android.viewholders.LoadingHolder;
 import com.zulip.android.viewholders.MessageHeaderParent;
@@ -38,7 +42,9 @@ import com.zulip.android.viewholders.MessageHolder;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Random;
 
 /**
  * An adapter to bind the messages to a RecyclerView.
@@ -63,6 +69,7 @@ public class RecyclerMessageAdapter extends RecyclerView.Adapter<RecyclerView.Vi
     private static String privateHuddleText;
     private List<Object> items;
     private ZulipApp zulipApp;
+    private MutedTopics mMutedTopics;
     private Context context;
     private NarrowListener narrowListener;
     private static final float HEIGHT_IN_DP = 48;
@@ -82,6 +89,7 @@ public class RecyclerMessageAdapter extends RecyclerView.Adapter<RecyclerView.Vi
     private UpdateBuilder<Message, Object> updateBuilder;
 
     private boolean isCurrentThemeNight;
+    private HashMap<Integer, Integer> defaultAvatarColorHMap;
 
     int getContextMenuItemSelectedPosition() {
         return contextMenuItemSelectedPosition;
@@ -91,6 +99,7 @@ public class RecyclerMessageAdapter extends RecyclerView.Adapter<RecyclerView.Vi
         super();
         items = new ArrayList<>();
         zulipApp = ZulipApp.get();
+        mMutedTopics = MutedTopics.get();
         this.context = context;
         narrowListener = (NarrowListener) context;
         this.startedFromFilter = startedFromFilter;
@@ -99,6 +108,7 @@ public class RecyclerMessageAdapter extends RecyclerView.Adapter<RecyclerView.Vi
         privateMessageBackground = ContextCompat.getColor(context, R.color.private_background);
         streamMessageBackground = ContextCompat.getColor(context, R.color.stream_background);
 
+        defaultAvatarColorHMap = new HashMap<>();
         privateHuddleText = context.getResources().getString(R.string.huddle_text);
         setupHeaderAndFooterViews();
         onItemClickListener = new OnItemClickListener() {
@@ -116,7 +126,6 @@ public class RecyclerMessageAdapter extends RecyclerView.Adapter<RecyclerView.Vi
                             narrowListener.onNarrowFillSendBoxStream(messageHeaderParent.getStream(), "", false);
                         }
                         break;
-
                     case R.id.instance: //Topic
                         MessageHeaderParent messageParent = (MessageHeaderParent) getItem(position);
                         if (messageParent.getMessageType() == MessageType.STREAM_MESSAGE) {
@@ -128,11 +137,11 @@ public class RecyclerMessageAdapter extends RecyclerView.Adapter<RecyclerView.Vi
                             narrowListener.onNarrowFillSendBoxPrivate(recipentArray, false);
                         }
                         break;
+                    case R.id.senderTile: // Sender Tile
                     case R.id.contentView: //Main message
                         Message message = (Message) getItem(position);
                         narrowListener.onNarrowFillSendBox(message, false);
                         break;
-
                     case R.id.messageTile:
                         Message msg = (Message) getItem(position);
                         try {
@@ -245,7 +254,7 @@ public class RecyclerMessageAdapter extends RecyclerView.Adapter<RecyclerView.Vi
             messageHeaderParent.setMessageType(message.getType());
             messageHeaderParent.setDisplayRecipent(message.getDisplayRecipient(zulipApp));
             if (message.getType() == MessageType.STREAM_MESSAGE) {
-                messageHeaderParent.setMute(zulipApp.isTopicMute(message));
+                messageHeaderParent.setMute(mMutedTopics.isTopicMute(message));
             }
             messageHeaderParent.setColor((message.getStream() == null) ? mDefaultStreamHeaderColor : message.getStream().getParsedColor());
             items.add(messageAndHeadersCount + 1, messageHeaderParent); //1 for LoadingHeader
@@ -285,7 +294,7 @@ public class RecyclerMessageAdapter extends RecyclerView.Adapter<RecyclerView.Vi
             item.setMessageType(message.getType());
             item.setDisplayRecipent(message.getDisplayRecipient(zulipApp));
             if (message.getType() == MessageType.STREAM_MESSAGE)
-                item.setMute(zulipApp.isTopicMute(message));
+                item.setMute(mMutedTopics.isTopicMute(message));
             item.setColor((message.getStream() == null) ? mDefaultStreamHeaderColor : message.getStream().getParsedColor());
             items.add(getItemCount(true) - 1, item);
             notifyItemInserted(getItemCount(true) - 1);
@@ -380,7 +389,7 @@ public class RecyclerMessageAdapter extends RecyclerView.Adapter<RecyclerView.Vi
     @Override
     public void onViewAttachedToWindow(RecyclerView.ViewHolder holder) {
         super.onViewRecycled(holder);
-        if (holder.getItemViewType() == VIEWTYPE_MESSAGE)
+        if (holder.getItemViewType() == VIEWTYPE_MESSAGE && !startedFromFilter)
             markThisMessageAsRead((Message) getItem(holder.getAdapterPosition()));
     }
 
@@ -391,10 +400,15 @@ public class RecyclerMessageAdapter extends RecyclerView.Adapter<RecyclerView.Vi
     private void markThisMessageAsRead(Message message) {
         try {
             int mID = message.getID();
-            if (!startedFromFilter && zulipApp.getPointer() < mID) {
+            if (zulipApp.getPointer() < mID) {
                 zulipApp.syncPointer(mID);
             }
-            if (!message.getMessageRead()) {
+
+            boolean isMessageRead = false;
+            if (message.getMessageRead() != null) {
+                isMessageRead = message.getMessageRead();
+            }
+            if (!isMessageRead) {
                 try {
                     updateBuilder.where().eq(Message.ID_FIELD, message.getID());
                     updateBuilder.updateColumnValue(Message.MESSAGE_READ_FIELD, true);
@@ -422,7 +436,7 @@ public class RecyclerMessageAdapter extends RecyclerView.Adapter<RecyclerView.Vi
     }
 
 
-    private void setUpGravatar(Message message, MessageHolder messageHolder) {
+    private void setUpGravatar(final Message message, final MessageHolder messageHolder) {
         //Setup Gravatar
         Bitmap gravatarImg = ((ZulipActivity) context).getGravatars().get(message.getSender().getEmail());
         if (gravatarImg != null) {
@@ -433,13 +447,63 @@ public class RecyclerMessageAdapter extends RecyclerView.Adapter<RecyclerView.Vi
             Resources resources = context.getResources();
             float px = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP,
                     35, resources.getDisplayMetrics());
+
+
             String url = message.getSender().getAvatarURL() + "&s=" + px;
+            url = UrlHelper.addHost(url);
+
             Picasso.with(context)
                     .load(url)
                     .placeholder(android.R.drawable.stat_notify_error)
                     .error(android.R.drawable.presence_online)
-                    .into(messageHolder.gravatar);
+                    .into(messageHolder.gravatar, new Callback() {
+                        @Override
+                        public void onSuccess() {
+
+                        }
+
+                        @Override
+                        public void onError() {
+                            int hMapKey = message.getSender().getId();
+                            int avatarColor;
+
+                            // check if current sender has already been allotted a randomly generated color
+                            if (defaultAvatarColorHMap.containsKey(hMapKey)) {
+                                avatarColor = defaultAvatarColorHMap.get(hMapKey);
+                            } else {
+                                // generate a random color for current sender id
+                                avatarColor = getRandomColor(Color.rgb(255, 255, 255));
+
+                                // add sender id and randomly generated color to hashmap
+                                defaultAvatarColorHMap.put(hMapKey, avatarColor);
+                            }
+                            // square default avatar drawable
+                            final GradientDrawable defaultAvatar = (GradientDrawable) ContextCompat.getDrawable(context, R.drawable.default_avatar);
+                            defaultAvatar.setColor(avatarColor);
+                            messageHolder.gravatar.setImageDrawable(defaultAvatar);
+                        }
+                    });
         }
+    }
+
+    /**
+     * Method to generate random saturated colors for default avatar {@link R.drawable#default_avatar}
+     * @param mix integer color is mixed with randomly generated red, blue, green colors
+     * @return a randomly generated color
+     */
+    private int getRandomColor(int mix) {
+        Random random = new Random();
+        int red = random.nextInt(256);
+        int green = random.nextInt(256);
+        int blue = random.nextInt(256);
+
+        // mix the color
+        red = (red + Color.red(mix)) / 2;
+        green = (green + Color.green(mix)) / 2;
+        blue = (blue + Color.blue(mix)) / 2;
+
+        int color = Color.rgb(red, green, blue);
+        return color;
     }
 
     @Override

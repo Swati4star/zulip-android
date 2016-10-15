@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
+import android.widget.Toast;
 
 import com.zulip.android.R;
 import com.zulip.android.networking.AsyncDevGetEmails;
@@ -61,17 +62,21 @@ public class DevAuthActivity extends BaseActivity {
         authEmailAdapter.setOnItemClickListener(new AuthClickListener() {
             @Override
             public void onItemClick(String email) {
-                if(email.contains("@")) {
-                    getApp().setEmail(email);
-                }
                 getServices()
                         .loginDEV(email)
                         .enqueue(new DefaultCallback<LoginResponse>() {
                             @Override
                             public void onSuccess(Call<LoginResponse> call, Response<LoginResponse> response) {
-                                getApp().setLoggedInApiKey(response.body().getApiKey());
+                                getApp().setLoggedInApiKey(response.body().getApiKey(), response.body().getEmail());
                                 openHome();
                             }
+
+                            @Override
+                            public void onError(Call<LoginResponse> call, Response<LoginResponse> response) {
+                                // do nothing
+                                Toast.makeText(DevAuthActivity.this, R.string.login_failed, Toast.LENGTH_LONG).show();
+                            }
+
                         });
             }
         });
